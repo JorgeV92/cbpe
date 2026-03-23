@@ -16,7 +16,7 @@ It is inspired by the style of small, readable Karpathy projects such as `minbpe
 - Vocabulary inspection with `get_vocab()` and `get_mergeable_ranks()`
 - `pytest` test suite
 - Small C demo for using the library directly
-- 
+
 ## How BPE works
 
 Byte Pair Encoding builds subword tokens by repeatedly merging the most common adjacent token pair.
