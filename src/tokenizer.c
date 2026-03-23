@@ -330,3 +330,134 @@ static const cbpe_merge_t* cbpe_find_merge(const cbpe_tokenizer_t* tokenizer,
   }
   return NULL;
 }
+
+int cbpe_tokenizer_encode(const cbpe_tokenizer_t* tokenizer,
+                          const unsigned char* text,
+                          size_t len,
+                          int** out_ids,
+                          size_t* out_len,
+                          char** error_out) {
+  if (tokenizer == NULL || out_ids == NULL || out_len == NULL) {
+    cbpe_set_error(error_out, "invalid arguments to encode");
+    return 0;
+  }
+  *out_ids = NULL;
+  *out_len = 0;
+
+  int* ids = NULL;
+  if (len > 0) {
+    ids = (int*)malloc(len * sizeof(int));
+    if (ids == NULL) {
+      cbpe_set_error(error_out, "failed to allocate encode buffer");
+      return 0;
+    }
+  }
+  for (size_t i = 0; i < len; ++i) {
+    ids[i] = text[i];
+  }
+
+  size_t cur_len = len;
+  while (cur_len >= 2) {
+    const cbpe_merge_t* best_merge = NULL;
+    for (size_t i = 0; i + 1 < cur_len; ++i) {
+      const cbpe_merge_t* merge = cbpe_find_merge(tokenizer, ids[i], ids[i + 1]);
+      if (merge == NULL) {
+        continue;
+      }
+      if (best_merge == NULL || merge->rank < best_merge->rank) {
+        best_merge = merge;
+      }
+    }
+    if (best_merge == NULL) {
+      break;
+    }
+
+    int* next_ids = (int*)malloc(cur_len * sizeof(int));
+    if (next_ids == NULL) {
+      free(ids);
+      cbpe_set_error(error_out, "failed to allocate merge buffer during encode");
+      return 0;
+    }
+    size_t next_len = 0;
+    size_t i = 0;
+    while (i < cur_len) {
+      if (i + 1 < cur_len && ids[i] == best_merge->left &&
+          ids[i + 1] == best_merge->right) {
+        next_ids[next_len++] = best_merge->new_id;
+        i += 2;
+      } else {
+        next_ids[next_len++] = ids[i++];
+      }
+    }
+    free(ids);
+    ids = next_ids;
+    cur_len = next_len;
+  }
+
+  *out_ids = ids;
+  *out_len = cur_len;
+  return 1;
+}
+
+int cbpe_tokenizer_decode(const cbpe_tokenizer_t* tokenizer,
+                          const int* ids,
+                          size_t ids_len,
+                          unsigned char** out_text,
+                          size_t* out_len,
+                          char** error_out) {
+  if (tokenizer == NULL || out_text == NULL || out_len == NULL) {
+    cbpe_set_error(error_out, "invalid arguments to decode");
+    return 0;
+  }
+
+  size_t total_len = 0;
+  for (size_t i = 0; i < ids_len; ++i) {
+    if (ids[i] < 0 || (size_t)ids[i] >= tokenizer->vocab_size) {
+      cbpe_set_error(error_out, "token id out of range during decode");
+      return 0;
+    }
+    total_len += tokenizer->token_bytes[ids[i]].len;
+  }
+
+  unsigned char* buffer = NULL;
+  if (total_len > 0) {
+    buffer = (unsigned char*)malloc(total_len);
+    if (buffer == NULL) {
+      cbpe_set_error(error_out, "failed to allocate decode buffer");
+      return 0;
+    }
+  }
+
+  size_t offset = 0;
+  for (size_t i = 0; i < ids_len; ++i) {
+    cbpe_bytes_t part = tokenizer->token_bytes[ids[i]];
+    if (part.len > 0) {
+      memcpy(buffer + offset, part.data, part.len);
+      offset += part.len;
+    }
+  }
+
+  *out_text = buffer;
+  *out_len = total_len;
+  return 1;
+}
+
+size_t cbpe_tokenizer_vocab_size(const cbpe_tokenizer_t* tokenizer) {
+  return tokenizer == NULL ? 0 : tokenizer->vocab_size;
+}
+
+const cbpe_bytes_t* cbpe_tokenizer_vocab_item(const cbpe_tokenizer_t* tokenizer,
+                                              size_t token_id) {
+  if (tokenizer == NULL || token_id >= tokenizer->vocab_size) {
+    return NULL;
+  }
+  return &tokenizer->token_bytes[token_id];
+}
+
+const cbpe_merge_t* cbpe_tokenizer_merges(const cbpe_tokenizer_t* tokenizer,
+                                          size_t* out_count) {
+  if (out_count != NULL) {
+    *out_count = tokenizer == NULL ? 0 : tokenizer->merge_count;
+  }
+  return tokenizer == NULL ? NULL : tokenizer->merges;
+}
